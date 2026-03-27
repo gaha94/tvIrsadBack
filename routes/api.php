@@ -36,3 +36,7 @@ Route::get('/products/slug/{slug}', [ProductController::class, 'showBySlug']);
 Route::get('/products/{id}', [ProductController::class, 'show']);
 
 Route::post('/orders', [OrderController::class, 'store']);
+Route::patch('/orders/{id}/status', [OrderController::class, 'updateStatus']);
+Route::get('/orders/number/{orderNumber}', [OrderController::class, 'showByNumber']);
+Route::get('/orders/{id}', [OrderController::class, 'show']);
+Route::get('/orders', [OrderController::class, 'index']);

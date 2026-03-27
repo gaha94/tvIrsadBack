@@ -35,4 +35,9 @@ class Order extends Model
     {
         return $this->belongsTo(Customer::class, 'customer_id');
     }
+
+    public function statusLogs()
+    {
+        return $this->hasMany(OrderStatusLog::class, 'order_id')->orderBy('id', 'desc');
+    }
 }
