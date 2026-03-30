@@ -3,11 +3,18 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\ProductCollection;
+use App\Http\Resources\ProductResource;
+use App\Services\Products\ProductFiltersService;
 use App\Models\Product;
 use Illuminate\Http\Request;
 
 class ProductController extends Controller
 {
+    public function __construct(
+        protected ProductFiltersService $productFiltersService
+    ) {}
+
     public function index(Request $request)
     {
         $perPage = (int) $request->get('per_page', 12);
@@ -96,179 +103,39 @@ class ProductController extends Controller
                 break;
         }
 
-        $products = $query->paginate($perPage)->through(function ($product) {
-            $stockTotal = (int) $product->stocks->sum('stock');
-            $reservedStockTotal = (int) $product->stocks->sum('reserved_stock');
-            $availableStock = max($stockTotal - $reservedStockTotal, 0);
+        $products = $query->paginate($perPage);
 
-            return [
-                'id' => $product->id,
-                'code' => $product->code,
-                'name' => $product->name,
-                'slug' => $product->slug,
-                'description' => $product->description,
-                'short_description' => $product->short_description,
-                'price' => $product->price,
-                'sale_price' => $product->sale_price,
-                'is_featured' => (bool) $product->is_featured,
-                'is_active' => (bool) $product->is_active,
-                'stock_total' => $stockTotal,
-                'reserved_stock_total' => $reservedStockTotal,
-                'available_stock' => $availableStock,
-                'in_stock' => $availableStock > 0,
-                'brand' => $product->brand ? [
-                    'id' => $product->brand->id,
-                    'name' => $product->brand->name,
-                    'slug' => $product->brand->slug,
-                ] : null,
-                'category' => $product->category ? [
-                    'id' => $product->category->id,
-                    'name' => $product->category->name,
-                    'slug' => $product->category->slug,
-                ] : null,
-                'main_image' => $product->mainImage ? [
-                    'id' => $product->mainImage->id,
-                    'image_path' => $product->mainImage->image_path,
-                    'image_url' => $product->mainImage->image_url,
-                    'alt_text' => $product->mainImage->alt_text,
-                    'is_main' => (bool) $product->mainImage->is_main,
-                    'sort_order' => $product->mainImage->sort_order,
-                ] : null,
-                'created_at' => $product->created_at,
-                'updated_at' => $product->updated_at,
-            ];
-        });
-
-        $filters = [
-            'brands' => \App\Models\Brand::select('id', 'name', 'slug')
-                ->where('is_active', 1)
-                ->orderBy('name')
-                ->get(),
-
-            'categories' => \App\Models\Category::select('id', 'name', 'slug')
-                ->where('is_active', 1)
-                ->orderBy('name')
-                ->get(),
-        ];
-
-        return response()->json([
-            'current_page' => $products->currentPage(),
-            'data' => $products->items(),
-            'last_page' => $products->lastPage(),
-            'per_page' => $products->perPage(),
-            'total' => $products->total(),
-            'filters' => $filters,
+        return (new ProductCollection($products))->additional([
+            'filters' => $this->productFiltersService->getFilters(),
         ]);
     }
 
     public function show($id)
     {
         $product = Product::with([
-                'brand:id,name,slug',
-                'category:id,name,slug',
-                'images:id,product_id,image_path,alt_text,is_main,sort_order',
-                'stocks:product_id,warehouse_id,stock,reserved_stock,updated_at',
-            ])
+            'brand:id,name,slug',
+            'category:id,name,slug',
+            'images:id,product_id,image_path,alt_text,is_main,sort_order',
+            'stocks:product_id,warehouse_id,stock,reserved_stock,updated_at',
+        ])
             ->where('is_active', 1)
             ->findOrFail($id);
 
-        $stockTotal = (int) $product->stocks->sum('stock');
-        $reservedStockTotal = (int) $product->stocks->sum('reserved_stock');
-        $availableStock = max($stockTotal - $reservedStockTotal, 0);
-
-        return response()->json([
-            'id' => $product->id,
-            'code' => $product->code,
-            'name' => $product->name,
-            'slug' => $product->slug,
-            'description' => $product->description,
-            'short_description' => $product->short_description,
-            'price' => $product->price,
-            'sale_price' => $product->sale_price,
-            'is_featured' => (bool) $product->is_featured,
-            'is_active' => (bool) $product->is_active,
-            'stock_total' => $stockTotal,
-            'reserved_stock_total' => $reservedStockTotal,
-            'available_stock' => $availableStock,
-            'in_stock' => $availableStock > 0,
-            'brand' => $product->brand ? [
-                'id' => $product->brand->id,
-                'name' => $product->brand->name,
-                'slug' => $product->brand->slug,
-            ] : null,
-            'category' => $product->category ? [
-                'id' => $product->category->id,
-                'name' => $product->category->name,
-                'slug' => $product->category->slug,
-            ] : null,
-            'images' => $product->images->map(function ($image) {
-                return [
-                    'id' => $image->id,
-                    'image_path' => $image->image_path,
-                    'image_url' => $image->image_url,
-                    'alt_text' => $image->alt_text,
-                    'is_main' => (bool) $image->is_main,
-                    'sort_order' => $image->sort_order,
-                ];
-            })->values(),
-            'created_at' => $product->created_at,
-            'updated_at' => $product->updated_at,
-        ]);
+        return new ProductResource($product);
     }
 
     public function showBySlug($slug)
     {
         $product = Product::with([
-                'brand:id,name,slug',
-                'category:id,name,slug',
-                'images:id,product_id,image_path,alt_text,is_main,sort_order',
-                'stocks:product_id,warehouse_id,stock,reserved_stock,updated_at',
-            ])
+            'brand:id,name,slug',
+            'category:id,name,slug',
+            'images:id,product_id,image_path,alt_text,is_main,sort_order',
+            'stocks:product_id,warehouse_id,stock,reserved_stock,updated_at',
+        ])
             ->where('is_active', 1)
             ->where('slug', $slug)
             ->firstOrFail();
 
-        $stockTotal = (int) $product->stocks->sum('stock');
-        $reservedStockTotal = (int) $product->stocks->sum('reserved_stock');
-        $availableStock = max($stockTotal - $reservedStockTotal, 0);
-
-        return response()->json([
-            'id' => $product->id,
-            'code' => $product->code,
-            'name' => $product->name,
-            'slug' => $product->slug,
-            'description' => $product->description,
-            'short_description' => $product->short_description,
-            'price' => $product->price,
-            'sale_price' => $product->sale_price,
-            'is_featured' => (bool) $product->is_featured,
-            'is_active' => (bool) $product->is_active,
-            'stock_total' => $stockTotal,
-            'reserved_stock_total' => $reservedStockTotal,
-            'available_stock' => $availableStock,
-            'in_stock' => $availableStock > 0,
-            'brand' => $product->brand ? [
-                'id' => $product->brand->id,
-                'name' => $product->brand->name,
-                'slug' => $product->brand->slug,
-            ] : null,
-            'category' => $product->category ? [
-                'id' => $product->category->id,
-                'name' => $product->category->name,
-                'slug' => $product->category->slug,
-            ] : null,
-            'images' => $product->images->map(function ($image) {
-                return [
-                    'id' => $image->id,
-                    'image_path' => $image->image_path,
-                    'image_url' => $image->image_url,
-                    'alt_text' => $image->alt_text,
-                    'is_main' => (bool) $image->is_main,
-                    'sort_order' => $image->sort_order,
-                ];
-            })->values(),
-            'created_at' => $product->created_at,
-            'updated_at' => $product->updated_at,
-        ]);
+        return new ProductResource($product);
     }
 }
