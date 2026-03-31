@@ -101,6 +101,9 @@ class CreateOrderService
                     [
                         'product_code' => $item['product_code'],
                         'product_name' => $item['product_name'],
+                        'reference_type' => 'order',
+                        'reference_id' => $order->id,
+                        'note' => 'Reserva por creación de orden ' . $order->order_number,
                     ]
                 );
             }

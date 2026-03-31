@@ -34,6 +34,8 @@ class ProductController extends Controller
                 'mainImage:id,product_id,image_path,alt_text,is_main,sort_order',
                 'stocks:product_id,warehouse_id,stock,reserved_stock,updated_at',
             ])
+            ->withSum('stocks as stock_total_sum', 'stock')
+            ->withSum('stocks as reserved_stock_total_sum', 'reserved_stock')
             ->where('is_active', 1);
 
         if ($request->filled('q')) {
@@ -67,9 +69,6 @@ class ProductController extends Controller
             $inStock = filter_var($request->in_stock, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
 
             if (!is_null($inStock)) {
-                $query->withSum('stocks as stock_total_sum', 'stock')
-                    ->withSum('stocks as reserved_stock_total_sum', 'reserved_stock');
-
                 if ($inStock) {
                     $query->havingRaw(
                         'COALESCE(stock_total_sum, 0) - COALESCE(reserved_stock_total_sum, 0) > 0'
@@ -83,6 +82,10 @@ class ProductController extends Controller
         }
 
         $sort = $request->get('sort', 'latest');
+
+        $query->orderByRaw(
+            '(COALESCE(stock_total_sum, 0) - COALESCE(reserved_stock_total_sum, 0) > 0) DESC'
+        )->orderByDesc('is_featured');
 
         switch ($sort) {
             case 'price_asc':

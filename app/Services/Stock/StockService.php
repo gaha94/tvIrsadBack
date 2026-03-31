@@ -8,6 +8,10 @@ use Illuminate\Validation\ValidationException;
 
 class StockService
 {
+    public function __construct(
+        protected StockMovementService $stockMovementService
+    ) {}
+
     public function getAvailableStock(Product $product): int
     {
         $stockTotal = (int) $product->stocks->sum('stock');
@@ -39,7 +43,9 @@ class StockService
     {
         $productStock = $this->getLockedStockRow($productId);
 
-        $availableStock = max(((int) $productStock->stock) - ((int) $productStock->reserved_stock), 0);
+        $stockBefore = (int) $productStock->stock;
+        $reservedBefore = (int) $productStock->reserved_stock;
+        $availableStock = max($stockBefore - $reservedBefore, 0);
 
         if ($availableStock < $quantity) {
             throw ValidationException::withMessages([
@@ -54,60 +60,149 @@ class StockService
             ]);
         }
 
-        $productStock->reserved_stock = ((int) $productStock->reserved_stock) + $quantity;
+        $productStock->reserved_stock = $reservedBefore + $quantity;
         $productStock->updated_at = now();
         $productStock->save();
+
+        $this->stockMovementService->log([
+            'product_id' => $productId,
+            'warehouse_id' => $productStock->warehouse_id,
+            'type' => 'reserve',
+            'quantity' => $quantity,
+            'stock_before' => $stockBefore,
+            'stock_after' => (int) $productStock->stock,
+            'reserved_before' => $reservedBefore,
+            'reserved_after' => (int) $productStock->reserved_stock,
+            'reference_type' => $context['reference_type'] ?? null,
+            'reference_id' => $context['reference_id'] ?? null,
+            'note' => $context['note'] ?? 'Reserva de stock',
+            'admin_id' => $context['admin_id'] ?? null,
+        ]);
     }
 
     public function confirmStock(int $productId, int $quantity, array $context = []): void
     {
         $productStock = $this->getLockedStockRow($productId);
 
-        $currentStock = (int) $productStock->stock;
-        $currentReserved = (int) $productStock->reserved_stock;
+        $stockBefore = (int) $productStock->stock;
+        $reservedBefore = (int) $productStock->reserved_stock;
 
-        if ($currentReserved < $quantity) {
+        if ($reservedBefore < $quantity) {
             throw ValidationException::withMessages([
                 'items' => [[
                     'product_id' => $productId,
                     'product_code' => $context['product_code'] ?? null,
                     'product_name' => $context['product_name'] ?? null,
                     'quantity' => $quantity,
-                    'reserved_stock' => $currentReserved,
+                    'reserved_stock' => $reservedBefore,
                     'message' => 'La reserva actual no alcanza para confirmar la orden.',
                 ]]
             ]);
         }
 
-        if ($currentStock < $quantity) {
+        if ($stockBefore < $quantity) {
             throw ValidationException::withMessages([
                 'items' => [[
                     'product_id' => $productId,
                     'product_code' => $context['product_code'] ?? null,
                     'product_name' => $context['product_name'] ?? null,
                     'quantity' => $quantity,
-                    'stock' => $currentStock,
+                    'stock' => $stockBefore,
                     'message' => 'El stock actual no alcanza para confirmar la orden.',
                 ]]
             ]);
         }
 
-        $productStock->stock = $currentStock - $quantity;
-        $productStock->reserved_stock = max($currentReserved - $quantity, 0);
+        $productStock->stock = $stockBefore - $quantity;
+        $productStock->reserved_stock = max($reservedBefore - $quantity, 0);
         $productStock->updated_at = now();
         $productStock->save();
+
+        $this->stockMovementService->log([
+            'product_id' => $productId,
+            'warehouse_id' => $productStock->warehouse_id,
+            'type' => 'confirm_discount',
+            'quantity' => $quantity,
+            'stock_before' => $stockBefore,
+            'stock_after' => (int) $productStock->stock,
+            'reserved_before' => $reservedBefore,
+            'reserved_after' => (int) $productStock->reserved_stock,
+            'reference_type' => $context['reference_type'] ?? null,
+            'reference_id' => $context['reference_id'] ?? null,
+            'note' => $context['note'] ?? 'Confirmación de orden',
+            'admin_id' => $context['admin_id'] ?? null,
+        ]);
     }
 
-    public function releaseReservedStock(int $productId, int $quantity): void
+    public function releaseReservedStock(int $productId, int $quantity, array $context = []): void
     {
         $productStock = $this->getLockedStockRow($productId);
 
-        $currentReserved = (int) $productStock->reserved_stock;
+        $stockBefore = (int) $productStock->stock;
+        $reservedBefore = (int) $productStock->reserved_stock;
 
-        if ($currentReserved > 0) {
-            $productStock->reserved_stock = max($currentReserved - $quantity, 0);
+        if ($reservedBefore > 0) {
+            $productStock->reserved_stock = max($reservedBefore - $quantity, 0);
             $productStock->updated_at = now();
             $productStock->save();
+
+            $this->stockMovementService->log([
+                'product_id' => $productId,
+                'warehouse_id' => $productStock->warehouse_id,
+                'type' => 'release_reserve',
+                'quantity' => $quantity,
+                'stock_before' => $stockBefore,
+                'stock_after' => (int) $productStock->stock,
+                'reserved_before' => $reservedBefore,
+                'reserved_after' => (int) $productStock->reserved_stock,
+                'reference_type' => $context['reference_type'] ?? null,
+                'reference_id' => $context['reference_id'] ?? null,
+                'note' => $context['note'] ?? 'Liberación de reserva',
+                'admin_id' => $context['admin_id'] ?? null,
+            ]);
         }
+    }
+
+    public function setManualStock(
+        int $productId,
+        int $stock,
+        ?int $reservedStock = null,
+        array $context = []
+    ): ProductStock {
+        $productStock = $this->getLockedStockRow($productId);
+
+        $stockBefore = (int) $productStock->stock;
+        $reservedBefore = (int) $productStock->reserved_stock;
+
+        $newStock = $stock;
+        $newReserved = $reservedStock ?? $reservedBefore;
+
+        if ($newReserved > $newStock) {
+            throw ValidationException::withMessages([
+                'reserved_stock' => ['La reserva no puede ser mayor que el stock total.'],
+            ]);
+        }
+
+        $productStock->stock = $newStock;
+        $productStock->reserved_stock = $newReserved;
+        $productStock->updated_at = now();
+        $productStock->save();
+
+        $this->stockMovementService->log([
+            'product_id' => $productId,
+            'warehouse_id' => $productStock->warehouse_id,
+            'type' => 'manual_set',
+            'quantity' => 0,
+            'stock_before' => $stockBefore,
+            'stock_after' => (int) $productStock->stock,
+            'reserved_before' => $reservedBefore,
+            'reserved_after' => (int) $productStock->reserved_stock,
+            'reference_type' => $context['reference_type'] ?? 'admin_manual',
+            'reference_id' => $context['reference_id'] ?? null,
+            'note' => $context['note'] ?? 'Ajuste manual de stock',
+            'admin_id' => $context['admin_id'] ?? null,
+        ]);
+
+        return $productStock;
     }
 }

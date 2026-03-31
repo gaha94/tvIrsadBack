@@ -50,6 +50,9 @@ class UpdateOrderStatusService
                         [
                             'product_code' => $item->product_code,
                             'product_name' => $item->product_name,
+                            'reference_type' => 'order',
+                            'reference_id' => $order->id,
+                            'note' => 'Descuento por confirmación de orden ' . $order->order_number,
                         ]
                     );
                 }
@@ -57,7 +60,12 @@ class UpdateOrderStatusService
                 if ($newStatus === 'cancelled') {
                     $this->stockService->releaseReservedStock(
                         $item->product_id,
-                        (int) $item->quantity
+                        (int) $item->quantity,
+                        [
+                            'reference_type' => 'order',
+                            'reference_id' => $order->id,
+                            'note' => 'Liberación por cancelación de orden ' . $order->order_number,
+                        ]
                     );
                 }
             }
